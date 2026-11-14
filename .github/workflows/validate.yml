@@ -95,6 +95,14 @@ jobs:
         with:
           node-version: 26
 
+      - name: 📦 Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
       - name: 📦 Install dependencies
         run: npm ci
 
@@ -169,18 +177,9 @@ jobs:
           max_attempts=4
           delay_seconds=45
           attempt=1
-          # Support both `app: my-app` and `app: 'my-app'` / `app: "my-app"`.
+          # Support both `app: my-app` and `app: 'my-app'` / `app: \"my-app\"`.
           app_name="$(
-            awk '
-              /^app:[[:space:]]*/ {
-                value = $0
-                sub(/^app:[[:space:]]*/, "", value)
-                gsub(/^['\''"]|['\''"]$/, "", value)
-                print value
-                exit
-              }
-            ' fly.yaml
-          )"
+            awk '\n              /^app:[[:space:]]*/ {\n                value = $0\n                sub(/^app:[[:space:]]*/, \"\", value)\n                gsub(/^[\'\\''\"\']|[\'\\''\"\']$/, \"\", value)\n                print value\n                exit\n              }\n            ' fly.yaml\n          )"
           if [ -z "$app_name" ]; then
             echo "Could not parse app name from fly.yaml" >&2
             exit 1
@@ -189,8 +188,8 @@ jobs:
           while true; do
             echo "::group::flyctl deploy attempt ${attempt}/${max_attempts}"
             set +e
-            flyctl deploy --remote-only \
-              --build-arg EPICSHOP_GITHUB_REPO=https://github.com/${{ github.repository }} \
+            flyctl deploy --remote-only \\
+              --build-arg EPICSHOP_GITHUB_REPO=https://github.com/${{ github.repository }} \\
               --build-arg EPICSHOP_COMMIT_SHA=${{ github.sha }}
             status=$?
             set -e
@@ -203,11 +202,11 @@ jobs:
               healthy=0
               for probe in 1 2 3 4 5 6 7 8 9 10; do
                 set +e
-                code="$(curl -sS -o /tmp/epicshop-health -w '%{http_code}' --max-time 30 \
-                  "https://${app_name}.fly.dev/resources/healthcheck")"
+                code="$(curl -sS -o /tmp/epicshop-health -w '%{http_code}' --max-time 30 \\
+                  \"https://${app_name}.fly.dev/resources/healthcheck\")"
                 curl_status=$?
                 set -e
-                body="$(tr -d '\n' </tmp/epicshop-health | head -c 80)"
+                body="$(tr -d '\\n' </tmp/epicshop-health | head -c 80)"
                 echo "probe ${probe}: curl_exit=${curl_status} http=${code} body=${body}"
                 if [ "$curl_status" -eq 0 ] && [ "$code" = "200" ]; then
                   healthy=1
