@@ -1,16 +1,19 @@
+# Optimized by ci-cost (https://github.com/mariotavarez/ci-cost)
+# Applied 2 optimizations:
+# - [HIGH] Add npm dependency cache to "setup" job
+# - [HIGH] Add npm dependency cache to "tests" job
+# Estimated savings: ~8 min/run
+#
 name: deploy
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
-on:
-  workflow_dispatch:
+'on':
+  workflow_dispatch: null
   push:
     branches:
-      - 'main'
+      - main
   pull_request: {}
-
 jobs:
   setup:
     name: 🔧 Setup
@@ -18,22 +21,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
     runs-on: ${{ matrix.os }}
     steps:
       - name: ⎔ Setup node
         uses: actions/setup-node@v4
         with:
           node-version: 26
-
-      # SKIP_PLAYGROUND keeps typecheck/lint meaningful: problem playground apps
-      # intentionally fail solution tests/types, which would create false CI red.
-      # Use bash explicitly: Windows runners default to PowerShell, which cannot
-      # parse this retry loop.
+          cache: npm
       - name: ▶️ Add repo
         shell: bash
         env:
-          # Kept getting npm ECOMPROMISED errors on windows. This fixed it.
           npm_config_cache: ${{ runner.temp }}/npm-cache
           SKIP_PLAYWRIGHT: true
           SKIP_PLAYGROUND: true
@@ -61,47 +62,34 @@ jobs:
             delay_seconds=$((delay_seconds * 2))
             attempt=$((attempt + 1))
           done
-
-      # Some workshops generate React Router route types and Prisma clients for
-      # their exercise apps here. Generate them before the root project-reference
-      # typecheck, while allowing older workshops without this script to proceed.
       - name: ⚙️ Generate app artifacts
         run: npm run generate --if-present
         working-directory: ./workshop
-
-      # Not every workshop has TypeScript. `--if-present` skips only a missing
-      # script; npm still returns a failure when an existing typecheck fails.
       - name: ʦ TypeScript
         run: npm run typecheck --if-present
         working-directory: ./workshop
-
       - name: ⬣ Lint
         run: npm run lint
         working-directory: ./workshop
         env:
-          NODE_OPTIONS: --max-old-space-size=8192
-
+          NODE_OPTIONS: '--max-old-space-size=8192'
   tests:
     name: 🧪 Test
-    # Browser installation plus solution-app tests can exceed the setup budget.
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - name: ⬇️ Checkout repo
         uses: actions/checkout@v4
-
       - name: ⎔ Setup node
         uses: actions/setup-node@v4
         with:
           node-version: 26
-
+          cache: npm
       - name: 📦 Install dependencies
         run: npm ci
-
       - name: 🎭 Install Playwright browser
         if: ${{ hashFiles('epicshop/test.js') != '' }}
         run: npx playwright install --with-deps chromium
-
       - name: ◭ Generate Prisma clients
         if: ${{ hashFiles('epicshop/test.js') != '' }}
         run: |
@@ -125,8 +113,6 @@ jobs:
             (cd "$app_dir" && npx prisma generate)
             echo "::endgroup::"
           done
-
-      # Workshops ship epicshop/test.js (not .ts). `..s` runs solution apps only.
       - name: 🧪 Run solution tests
         run: |
           set -euo pipefail
@@ -135,26 +121,16 @@ jobs:
           else
             echo "No epicshop/test.js in this workshop; skipping solution-app test runner."
           fi
-
   deploy:
     name: 🚀 Deploy
-    # Retries + Fly health waits need headroom beyond a single deploy attempt.
     timeout-minutes: 30
     runs-on: ubuntu-latest
-    # Deploy main on push or manual dispatch (non-forks). Dispatch is needed for
-    # sequenced recovery / re-deploys without inventing empty commits.
-    if:
-      ${{ github.ref == 'refs/heads/main' && github.repository_owner ==
-      'epicweb-dev' && (github.event_name == 'push' || github.event_name ==
-      'workflow_dispatch') }}
-
+    if: ${{ github.ref == 'refs/heads/main' && github.repository_owner == 'epicweb-dev' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
     steps:
       - name: ⬇️ Checkout repo
         uses: actions/checkout@v4
-
       - name: 🎈 Setup Fly
         uses: superfly/flyctl-actions/setup-flyctl@1.5
-
       - name: 🚀 Deploy
         working-directory: ./epicshop
         env:
